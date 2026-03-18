@@ -1,22 +1,34 @@
+import os
 from pathlib import Path
 import yaml
 
 CONFIG_DIR = Path.home() / ".setu-review"
 
 
-def init_config(gitlab_pat: str, gitlab_url: str = "https://gitlab.com"):
+def init_config(gitlab_pat: str, gitlab_url: str = "https://gitlab.com", username: str = ""):
+    import gitlab
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     (CONFIG_DIR / "rules").mkdir(exist_ok=True)
+
+    # Derive username from GitLab API if not provided
+    if not username:
+        gl = gitlab.Gitlab(gitlab_url, private_token=gitlab_pat)
+        gl.auth()
+        username = gl.user.username
 
     config = {
         "gitlab_pat": gitlab_pat,
         "gitlab_url": gitlab_url,
-        "username": "pulkit28",
+        "username": username,
         "batch_size": 30,
     }
 
-    with open(CONFIG_DIR / "config.yaml", "w") as f:
+    config_path = CONFIG_DIR / "config.yaml"
+    with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+
+    # Restrict file permissions (owner only)
+    config_path.chmod(0o600)
 
     return config
 
@@ -28,4 +40,11 @@ def load_config() -> dict:
             "Config not found. Run: setu-review init"
         )
     with open(config_path) as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+
+    # Allow env var override for PAT
+    env_pat = os.environ.get("GITLAB_PAT")
+    if env_pat:
+        config["gitlab_pat"] = env_pat
+
+    return config

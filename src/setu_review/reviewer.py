@@ -78,7 +78,8 @@ def review_file(
         file_path, diff, file_content, style_profile, project_rules, mr_context
     )
     result = subprocess.run(
-        ["claude", "-p", "--output-format", "text", prompt],
+        ["claude", "-p", "--output-format", "text"],
+        input=prompt,
         capture_output=True,
         text=True,
         timeout=120,
@@ -106,7 +107,7 @@ def review_mr_files(
         print(f"  Reviewing batch {batch_start // batch_size + 1} "
               f"({len(batch)} files)...")
 
-        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+        with ThreadPoolExecutor(max_workers=min(len(batch), 8)) as executor:
             futures = {}
             for f in batch:
                 path = f["new_path"]

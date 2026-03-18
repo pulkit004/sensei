@@ -61,7 +61,8 @@ Output a structured style profile in markdown format."""
 def analyze_with_claude(prompt: str) -> str:
     """Run a prompt through claude CLI and return the output."""
     result = subprocess.run(
-        ["claude", "-p", "--output-format", "text", prompt],
+        ["claude", "-p", "--output-format", "text"],
+        input=prompt,
         capture_output=True,
         text=True,
         timeout=120,

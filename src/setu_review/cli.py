@@ -11,11 +11,12 @@ def main():
 @main.command()
 @click.option("--pat", prompt="GitLab PAT", hide_input=True, help="Your GitLab Personal Access Token")
 @click.option("--url", default="https://gitlab.com", help="GitLab instance URL")
-def init(pat, url):
+@click.option("--username", default="", help="GitLab username (auto-detected if omitted)")
+def init(pat, url, username):
     """Initialize setu-review with your GitLab credentials."""
     from setu_review.config import init_config
-    init_config(gitlab_pat=pat, gitlab_url=url)
-    click.echo("Config saved to ~/.setu-review/config.yaml")
+    config = init_config(gitlab_pat=pat, gitlab_url=url, username=username)
+    click.echo(f"Config saved to ~/.setu-review/config.yaml (user: {config['username']})")
 
 
 @main.command()
@@ -66,7 +67,11 @@ def review(mr_url, dry_run):
     from setu_review.formatter import format_review, format_for_gitlab
 
     config = load_config()
-    project_path, mr_iid = parse_mr_url(mr_url)
+    try:
+        project_path, mr_iid = parse_mr_url(mr_url)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
 
     click.echo(f"Fetching MR !{mr_iid} from {project_path}...")
     client = GitLabClient(config["gitlab_url"], config["gitlab_pat"])
