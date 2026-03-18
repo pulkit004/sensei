@@ -64,7 +64,7 @@ def review(mr_url, dry_run):
         load_project_rules,
         load_project_rules_from_repo,
     )
-    from setu_review.formatter import format_review, format_for_gitlab
+    from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment
 
     config = load_config()
     try:
@@ -144,7 +144,7 @@ def review(mr_url, dry_run):
                     mr_iid=mr_iid,
                     file_path=c["file"],
                     new_line=c["line"],
-                    body=f"**[{c['category']}]** {c['body']}",
+                    body=format_inline_comment(c),
                     base_sha=mr_data["base_sha"],
                     head_sha=mr_data["head_sha"],
                     start_sha=mr_data["start_sha"],

@@ -12,7 +12,7 @@ def build_file_review_prompt(
     project_rules: str,
     mr_context: str,
 ) -> str:
-    return f"""You are a code reviewer. Review ONLY the changed lines in this diff.
+    return f"""You are a senior code reviewer. Review ONLY the changed lines in this diff.
 
 ## Your Review Style
 {style_profile}
@@ -36,32 +36,56 @@ def build_file_review_prompt(
 ```
 
 ## Output Format
-Output ONLY review comments, one per line, in this exact format:
-L<line_number>: [<category>] <comment>
+
+For each issue found, output a comment block in this exact format:
+
+---
+L<line_number> [<category>]
+<observation about what the code does and what the issue is>
+Per our standards: "<quote the specific rule being violated>"
+Suggestion: <concrete actionable fix>
+---
 
 Categories: bug, style, naming, performance, security, suggestion, question
 
-If the changes look good, output:
-LGTM
-
-Do not output anything else."""
+Rules for writing comments:
+- Be specific. Reference actual variable names, function names, and values.
+- Always cite which project rule or standard applies using "Per our standards:" with a direct quote.
+- The suggestion must be concrete and actionable — not vague advice.
+- If the change looks good, output only: LGTM
+- Do not output anything else outside the --- delimiters."""
 
 
 def parse_review_output(raw: str, file_path: str) -> list:
     """Parse Claude's review output into structured comments."""
     comments = []
-    for line in raw.strip().splitlines():
-        line = line.strip()
-        if line == "LGTM" or not line:
+    raw = raw.strip()
+
+    if raw == "LGTM":
+        return comments
+
+    # Split on --- delimiters
+    blocks = re.split(r'^---\s*$', raw, flags=re.MULTILINE)
+
+    for block in blocks:
+        block = block.strip()
+        if not block:
             continue
-        match = re.match(r"L(\d+):\s*\[(\w+)\]\s*(.+)", line)
-        if match:
+
+        # First line should be L<number> [category]
+        lines = block.splitlines()
+        header_match = re.match(r'L(\d+)\s*\[(\w+)\]', lines[0].strip())
+        if header_match:
+            line_num = int(header_match.group(1))
+            category = header_match.group(2)
+            body = "\n".join(lines[1:]).strip()
             comments.append({
                 "file": file_path,
-                "line": int(match.group(1)),
-                "category": match.group(2),
-                "body": match.group(3),
+                "line": line_num,
+                "category": category,
+                "body": body,
             })
+
     return comments
 
 
@@ -86,7 +110,7 @@ def review_file(
     )
     if result.returncode != 0:
         return [{"file": file_path, "line": 0, "category": "error",
-                 "body": f"Review failed: {result.stderr[:200]}"}]
+                 "body": f"Review failed: exit={result.returncode} stderr={result.stderr[:500]} stdout={result.stdout[:500]}"}]
 
     return parse_review_output(result.stdout, file_path)
 

@@ -17,15 +17,24 @@ def test_build_file_review_prompt_includes_diff():
 
 
 def test_parse_review_output_extracts_comments():
-    raw = """L12: [bug] Missing null check for user parameter
-L45: [style] Prefer early return over nested if
-L89: [naming] Variable 'x' should be descriptive"""
+    raw = """---
+L12 [bug]
+The `user` parameter is not checked for null before accessing `.name`.
+Per our standards: "Do not mutate input parameters."
+Suggestion: Add a guard clause: `if (!user) return null;`
+---
+L45 [style]
+Nested if/else block adds unnecessary indentation.
+Per our standards: "Prefer early returns over else."
+Suggestion: Use an early return for the falsy case.
+---"""
     comments = parse_review_output(raw, "src/auth.py")
-    assert len(comments) == 3
+    assert len(comments) == 2
     assert comments[0]["line"] == 12
     assert comments[0]["category"] == "bug"
-    assert "null check" in comments[0]["body"]
+    assert "null" in comments[0]["body"]
     assert comments[0]["file"] == "src/auth.py"
+    assert "Per our standards" in comments[1]["body"]
 
 
 def test_parse_review_output_lgtm():

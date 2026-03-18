@@ -1,4 +1,4 @@
-from setu_review.formatter import format_review, format_for_gitlab
+from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment
 
 
 def test_format_review_groups_by_file():
@@ -25,3 +25,11 @@ def test_format_for_gitlab_produces_markdown():
     md = format_for_gitlab(comments)
     assert "src/a.py" in md
     assert "bug" in md.lower()
+
+
+def test_format_inline_comment():
+    comment = {"category": "bug", "body": "Missing null check.\nPer our standards: \"Validate inputs.\"\nSuggestion: Add guard clause."}
+    result = format_inline_comment(comment)
+    assert "Code Review" in result
+    assert "bug" in result
+    assert "Per our standards" in result
