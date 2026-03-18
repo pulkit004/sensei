@@ -337,7 +337,7 @@ def load_style_profile() -> str:
 
 
 def load_project_rules(project_path: str) -> str:
-    """Try to load project-specific rules from ~/.setu-review/rules/."""
+    """Try to load project-specific rules from ~/.sensei/rules/."""
     safe_name = project_path.replace("/", "_")
     rules_file = CONFIG_DIR / "rules" / f"{safe_name}.md"
     if rules_file.exists():

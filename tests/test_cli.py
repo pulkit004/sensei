@@ -6,7 +6,7 @@ def test_cli_help():
     runner = CliRunner()
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0
-    assert "setu-review" in result.output
+    assert "Sensei" in result.output
 
 
 def test_learn_command_exists():

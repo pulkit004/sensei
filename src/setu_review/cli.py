@@ -4,7 +4,7 @@ import click
 
 @click.group()
 def main():
-    """setu-review: AI-powered GitLab MR reviewer."""
+    """Sensei: AI-powered GitLab MR reviewer."""
     pass
 
 
@@ -13,10 +13,10 @@ def main():
 @click.option("--url", default="https://gitlab.com", help="GitLab instance URL")
 @click.option("--username", default="", help="GitLab username (auto-detected if omitted)")
 def init(pat, url, username):
-    """Initialize setu-review with your GitLab credentials."""
+    """Initialize Sensei with your GitLab credentials."""
     from setu_review.config import init_config
     config = init_config(gitlab_pat=pat, gitlab_url=url, username=username)
-    click.echo(f"Config saved to ~/.setu-review/config.yaml (user: {config['username']})")
+    click.echo(f"Config saved to ~/.sensei/config.yaml (user: {config['username']})")
 
 
 @main.command()
@@ -189,7 +189,7 @@ def review(mr_url, dry_run):
             tmp.write(format_for_gitlab(comments))
             tmp_path = tmp.name
         click.echo(f"Review saved to {tmp_path} — edit it, then run:")
-        click.echo(f"  setu-review post {mr_url} {tmp_path}")
+        click.echo(f"  sensei post {mr_url} {tmp_path}")
     else:
         click.echo("Review discarded.")
 
