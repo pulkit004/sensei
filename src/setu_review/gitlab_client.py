@@ -3,6 +3,28 @@ from urllib.parse import urlparse
 import gitlab
 
 
+def extract_diff_lines(diff: str) -> set:
+    """Extract new-side line numbers that are part of the diff."""
+    lines = set()
+    current_line = 0
+    for line in diff.splitlines():
+        # Parse hunk headers: @@ -old,count +new,count @@
+        hunk_match = re.match(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
+        if hunk_match:
+            current_line = int(hunk_match.group(1))
+            continue
+        if line.startswith('+') and not line.startswith('+++'):
+            lines.add(current_line)
+            current_line += 1
+        elif line.startswith('-') and not line.startswith('---'):
+            # Removed lines don't advance the new-side counter
+            pass
+        else:
+            # Context line
+            current_line += 1
+    return lines
+
+
 def parse_mr_url(url: str) -> tuple:
     """Extract project path and MR IID from a GitLab MR URL."""
     url = url.rstrip("/")

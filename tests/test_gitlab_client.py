@@ -1,4 +1,4 @@
-from setu_review.gitlab_client import parse_mr_url
+from setu_review.gitlab_client import parse_mr_url, extract_diff_lines
 
 
 def test_parse_mr_url_standard():
@@ -23,3 +23,17 @@ def test_parse_mr_url_nested_group():
     )
     assert project == "brokentusk/facade/docs-mdx"
     assert mr_iid == 45
+
+
+def test_extract_diff_lines():
+    diff = """@@ -10,6 +10,8 @@ some context
+ unchanged line
++added line 11
++added line 12
+ unchanged line
+-removed line
+ unchanged line"""
+    lines = extract_diff_lines(diff)
+    assert 11 in lines
+    assert 12 in lines
+    assert 10 not in lines  # context line, not added

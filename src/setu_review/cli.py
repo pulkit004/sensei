@@ -57,7 +57,7 @@ def learn():
 def review(mr_url, dry_run):
     """Review a GitLab Merge Request."""
     from setu_review.config import load_config
-    from setu_review.gitlab_client import parse_mr_url, GitLabClient
+    from setu_review.gitlab_client import parse_mr_url, GitLabClient, extract_diff_lines
     from setu_review.reviewer import (
         review_mr_files,
         load_style_profile,
@@ -132,28 +132,48 @@ def review(mr_url, dry_run):
     )
 
     if action == "approve":
-        click.echo("Posting inline comments to GitLab...")
-        posted = 0
-        failed = 0
+        click.echo("Posting comments to GitLab...")
+        # Build diff line sets per file for validation
+        diff_lines_map = {}
+        for f in mr_data["files"]:
+            if f["diff"]:
+                diff_lines_map[f["new_path"]] = extract_diff_lines(f["diff"])
+
+        inline_posted = 0
+        general_posted = 0
         for c in comments:
             if c["line"] == 0:
                 continue
+            body = format_inline_comment(c)
+            valid_lines = diff_lines_map.get(c["file"], set())
+
+            if c["line"] in valid_lines:
+                # Line is in the diff — post inline
+                try:
+                    client.post_inline_comment(
+                        project_path=project_path,
+                        mr_iid=mr_iid,
+                        file_path=c["file"],
+                        new_line=c["line"],
+                        body=body,
+                        base_sha=mr_data["base_sha"],
+                        head_sha=mr_data["head_sha"],
+                        start_sha=mr_data["start_sha"],
+                    )
+                    inline_posted += 1
+                    continue
+                except Exception:
+                    pass  # Fall through to general comment
+
+            # Line not in diff or inline failed — post as general comment
+            file_body = f"**`{c['file']}` L{c['line']}**\n\n{body}"
             try:
-                client.post_inline_comment(
-                    project_path=project_path,
-                    mr_iid=mr_iid,
-                    file_path=c["file"],
-                    new_line=c["line"],
-                    body=format_inline_comment(c),
-                    base_sha=mr_data["base_sha"],
-                    head_sha=mr_data["head_sha"],
-                    start_sha=mr_data["start_sha"],
-                )
-                posted += 1
+                client.post_mr_comment(project_path, mr_iid, file_body)
+                general_posted += 1
             except Exception as e:
-                failed += 1
-                click.echo(f"  Failed to post on {c['file']}:L{c['line']}: {e}")
-        click.echo(f"Posted {posted} inline comments ({failed} failed)")
+                click.echo(f"  Failed: {c['file']}:L{c['line']}: {e}")
+
+        click.echo(f"Posted {inline_posted} inline + {general_posted} general comments")
     elif action == "edit":
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
