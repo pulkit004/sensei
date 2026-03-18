@@ -1,3 +1,4 @@
+from pathlib import Path
 import click
 
 
@@ -5,6 +6,16 @@ import click
 def main():
     """setu-review: AI-powered GitLab MR reviewer."""
     pass
+
+
+@main.command()
+@click.option("--pat", prompt="GitLab PAT", hide_input=True, help="Your GitLab Personal Access Token")
+@click.option("--url", default="https://gitlab.com", help="GitLab instance URL")
+def init(pat, url):
+    """Initialize setu-review with your GitLab credentials."""
+    from setu_review.config import init_config
+    init_config(gitlab_pat=pat, gitlab_url=url)
+    click.echo("Config saved to ~/.setu-review/config.yaml")
 
 
 @main.command()
