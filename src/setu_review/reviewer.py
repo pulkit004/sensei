@@ -46,18 +46,25 @@ def build_file_review_prompt(
 
 ## Writing style for comments
 
-Write each comment like a human colleague would on a real code review. Here's an example of the tone and format:
+Write each comment like a thoughtful human colleague — concise, scannable, empathetic. Follow this exact structure:
 
-"Code Review: All 9 font-weight utility classes (.fw-100 through .fw-900) are added, but only .fw-600 and .fw-700 are actually used in this MR.
-Per our standards: "Remove dead, unused, or commented-out code immediately."
-Suggestion: Only add the classes that are needed (.fw-600, .fw-700). Also, these are duplicated in both apps/bridge-goddamn-redux and apps/utumno — consider moving them to a shared stylesheet."
+EXAMPLE:
 
-Rules for writing:
-- Start with "Code Review:" then describe what you see and why it's a problem. Be specific — use actual variable names, values, file paths.
-- Quote the relevant project rule with "Per our standards:" — this is important, always cite which rule applies.
-- End with "Suggestion:" — a concrete, actionable fix. Not vague advice.
-- Sound like a real person. No bullet points, no severity tags, no confidence scores in the comment text.
-- Only flag things you're genuinely confident about (>= 80% sure it's a real issue). Skip nitpicks.
+"Code Review: This block adds ~36 lines of `!important` overrides using fragile `[class*="setu:..."]` attribute selectors.
+While understandable as a migration shim, this is a maintenance risk:
+
+• Attribute substring matching is brittle and can match unintended classes
+• `!important` makes future CSS changes difficult to reason about
+
+Suggestion: Add a `// TODO(BRIDGE-XXXX)`: Remove badge compatibility overrides once @setu/components Badge stabilizes comment with a tracking ticket so this doesn't become permanent technical debt."
+
+RULES:
+1. Start with "Code Review:" — one short sentence describing what you observe. Be specific (use actual names, values).
+2. Acknowledge intent with "While understandable as [context], this is a [risk type]:" — show empathy, then name the risk.
+3. Use bullet points (•) for the specific issues — keep each bullet to one line, scannable.
+4. End with "Suggestion:" — one concrete, actionable fix in 1-2 sentences.
+5. Keep the whole comment SHORT. If you can say it in 3 bullets, don't write 5.
+6. Only flag issues you're genuinely confident about (>= 80%). Skip nitpicks.
 
 ## Output Format
 
@@ -105,12 +112,13 @@ def build_silent_failure_prompt(
 
 ## Writing style
 
-Write each comment like a human colleague. Format:
-"Code Review: [describe what you see and why it's a problem]
-Per our standards: "[quote the rule]"
-Suggestion: [concrete fix]"
+Use this structure:
+1. "Code Review:" — short observation sentence
+2. "While understandable as [context], this is a [risk]:" — acknowledge intent, name the risk
+3. Bullet points (•) for specific issues — one line each, scannable
+4. "Suggestion:" — concrete fix in 1-2 sentences
 
-Only flag issues you're >= 80% confident about.
+Keep it short. Only flag issues >= 80% confidence.
 
 ## Output Format
 
