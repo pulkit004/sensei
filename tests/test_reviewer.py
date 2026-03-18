@@ -14,47 +14,50 @@ def test_build_file_review_prompt_includes_diff():
     assert "def login" in prompt
     assert "readability" in prompt
     assert "type hints" in prompt
-    assert "Confidence Scoring" in prompt
-    assert "Silent Failures" in prompt
+    assert "Code Review:" in prompt  # example format
 
 
-def test_parse_json_review_extracts_comments():
+def test_parse_json_review_new_format():
     raw = '''[
         {
             "line": 12,
             "confidence": 92,
-            "severity": "critical",
-            "category": "bug",
-            "observation": "Missing null check for user parameter",
-            "rule": "Do not mutate input parameters",
-            "suggestion": "Add guard clause: if (!user) return null;"
+            "comment": "Code Review: The `user` parameter is not null-checked before accessing `.name`.\\nPer our standards: \\"Do not mutate input parameters.\\"\\nSuggestion: Add a guard clause: `if (!user) return null;`"
         },
         {
             "line": 45,
             "confidence": 85,
-            "severity": "important",
-            "category": "style",
-            "observation": "Nested if/else adds complexity",
-            "rule": "Prefer early returns over else",
-            "suggestion": "Use early return for the falsy case"
+            "comment": "Code Review: Nested if/else adds unnecessary complexity.\\nPer our standards: \\"Prefer early returns over else.\\"\\nSuggestion: Use an early return for the falsy case."
         }
     ]'''
     comments = parse_json_review(raw, "src/auth.py")
     assert len(comments) == 2
     assert comments[0]["line"] == 12
     assert comments[0]["confidence"] == 92
-    assert comments[0]["severity"] == "critical"
-    assert "null check" in comments[0]["body"]
-    assert 'Per our standards' in comments[0]["body"]
-    assert "Suggestion:" in comments[0]["body"]
+    assert "Code Review:" in comments[0]["body"]
+    assert "Per our standards" in comments[1]["body"]
+
+
+def test_parse_json_review_old_format_compat():
+    raw = '''[
+        {
+            "line": 20,
+            "confidence": 90,
+            "observation": "Real bug",
+            "rule": "No any",
+            "suggestion": "Fix it"
+        }
+    ]'''
+    comments = parse_json_review(raw, "src/foo.py")
+    assert len(comments) == 1
+    assert "Real bug" in comments[0]["body"]
+    assert "Per our standards" in comments[0]["body"]
 
 
 def test_parse_json_review_filters_low_confidence():
     raw = '''[
-        {"line": 10, "confidence": 75, "severity": "important", "category": "style",
-         "observation": "Minor nitpick", "rule": "n/a", "suggestion": "n/a"},
-        {"line": 20, "confidence": 90, "severity": "critical", "category": "bug",
-         "observation": "Real bug", "rule": "No any", "suggestion": "Fix it"}
+        {"line": 10, "confidence": 75, "comment": "Minor nitpick"},
+        {"line": 20, "confidence": 90, "comment": "Code Review: Real bug here."}
     ]'''
     comments = parse_json_review(raw, "src/foo.py")
     assert len(comments) == 1
@@ -68,8 +71,7 @@ def test_parse_json_review_empty_array():
 
 def test_parse_json_review_handles_markdown_wrapped():
     raw = '''```json
-    [{"line": 5, "confidence": 85, "severity": "important", "category": "naming",
-      "observation": "Bad name", "rule": "Use clear names", "suggestion": "Rename"}]
+    [{"line": 5, "confidence": 85, "comment": "Code Review: Bad name."}]
     ```'''
     comments = parse_json_review(raw, "src/foo.py")
     assert len(comments) == 1

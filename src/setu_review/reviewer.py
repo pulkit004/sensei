@@ -13,8 +13,7 @@ def build_file_review_prompt(
     project_rules: str,
     mr_context: str,
 ) -> str:
-    return f"""You are a senior code reviewer using a structured review methodology.
-Review ONLY the changed lines in this diff. Be thorough but precise.
+    return f"""You are a thoughtful senior engineer reviewing a teammate's code. Write like a human — direct, specific, helpful. No corporate tone, no robotic structure, no filler.
 
 ## Your Review Style
 {style_profile}
@@ -37,44 +36,39 @@ Review ONLY the changed lines in this diff. Be thorough but precise.
 {diff}
 ```
 
-## Review Checklist
+## What to look for
+- Bugs, type safety issues, implicit `any`
+- Silent failures, swallowed errors, fallbacks that hide problems
+- Naming inconsistencies, missing conventions
+- Missing tests for new logic
+- Security issues, environment misconfigs
+- Architecture violations (cross-layer leakage, duplication across packages)
 
-Evaluate the changes against each dimension:
+## Writing style for comments
 
-1. **Code Quality**: Separation of concerns, error handling, type safety, DRY, edge cases
-2. **Architecture**: Design decisions, scalability, cross-layer leakage
-3. **Naming & Types**: Clear names, consistent conventions, type precision
-4. **Error Handling & Silent Failures**:
-   - Are there try-catch blocks that swallow errors?
-   - Are there fallbacks that mask underlying problems?
-   - Will the user get actionable feedback if something fails?
-   - Are there empty catch blocks or catch-and-continue patterns?
-5. **Testing**: Are corresponding tests included? Do they test behavior, not implementation?
-6. **Security**: Input validation, sensitive data exposure
-7. **Performance**: Unnecessary re-renders, expensive operations, missing memoization
+Write each comment like a human colleague would on a real code review. Here's an example of the tone and format:
 
-## Confidence Scoring
+"Code Review: All 9 font-weight utility classes (.fw-100 through .fw-900) are added, but only .fw-600 and .fw-700 are actually used in this MR.
+Per our standards: "Remove dead, unused, or commented-out code immediately."
+Suggestion: Only add the classes that are needed (.fw-600, .fw-700). Also, these are duplicated in both apps/bridge-goddamn-redux and apps/utumno — consider moving them to a shared stylesheet."
 
-For each issue you find, assign a confidence score (0-100):
-- 90-100: Critical — explicit rule violation, definite bug, or security issue
-- 80-89: Important — strong evidence of a real problem
-- Below 80: DO NOT REPORT. Only report issues with confidence >= 80.
+Rules for writing:
+- Start with "Code Review:" then describe what you see and why it's a problem. Be specific — use actual variable names, values, file paths.
+- Quote the relevant project rule with "Per our standards:" — this is important, always cite which rule applies.
+- End with "Suggestion:" — a concrete, actionable fix. Not vague advice.
+- Sound like a real person. No bullet points, no severity tags, no confidence scores in the comment text.
+- Only flag things you're genuinely confident about (>= 80% sure it's a real issue). Skip nitpicks.
 
 ## Output Format
 
-Return a valid JSON array. Each element must have these fields:
+Return a valid JSON array. Each element:
 - "line": integer (line number in the new file)
-- "confidence": integer (80-100)
-- "severity": "critical" or "important"
-- "category": one of "bug", "style", "naming", "performance", "security", "error-handling", "testing", "architecture"
-- "observation": string (what the code does and what the issue is — be specific, reference actual names)
-- "rule": string (the specific project rule or standard being violated — quote it directly)
-- "suggestion": string (concrete, actionable fix)
+- "confidence": integer (80-100, used internally — not shown in comment)
+- "comment": string (the full human-readable comment as described above)
 
-If the changes look good and no issues have confidence >= 80, return:
-[]
+If the changes look good, return: []
 
-Return ONLY the JSON array, nothing else. No markdown, no explanation outside the JSON."""
+Return ONLY the JSON array, nothing else."""
 
 
 def build_silent_failure_prompt(
@@ -83,8 +77,7 @@ def build_silent_failure_prompt(
     file_content: str,
     project_rules: str,
 ) -> str:
-    return f"""You are a silent failure hunter. Your job is to find error handling code that
-silently fails, swallows errors, or gives users no feedback when things go wrong.
+    return f"""You are reviewing error handling in a teammate's code. Look for places where errors are silently swallowed, users get no feedback, or fallbacks mask real problems.
 
 ## Project Rules
 {project_rules}
@@ -101,30 +94,32 @@ silently fails, swallows errors, or gives users no feedback when things go wrong
 {diff}
 ```
 
-## What to Look For
+## What to look for
+- Empty catch blocks
+- Catch blocks that only log and continue — user gets no feedback
+- Returning null/undefined/default on error without logging
+- Optional chaining (?.) silently skipping important operations
+- Fallback values that mask underlying problems
+- Missing error propagation — error should bubble up but doesn't
+- Generic catch blocks catching all errors when only specific ones expected
 
-1. **Empty catch blocks** — absolutely forbidden
-2. **Catch blocks that only log and continue** — user gets no feedback
-3. **Returning null/undefined/default on error without logging** — silent data loss
-4. **Optional chaining (?.) silently skipping operations** — may hide real errors
-5. **Fallback values that mask problems** — user doesn't know something went wrong
-6. **Missing error propagation** — error should bubble up but doesn't
-7. **Generic catch blocks** — catching all errors when only specific ones expected
-8. **Retry logic that exhausts without informing user**
+## Writing style
+
+Write each comment like a human colleague. Format:
+"Code Review: [describe what you see and why it's a problem]
+Per our standards: "[quote the rule]"
+Suggestion: [concrete fix]"
+
+Only flag issues you're >= 80% confident about.
 
 ## Output Format
 
 Return a valid JSON array. Each element:
 - "line": integer
-- "confidence": integer (80-100 only)
-- "severity": "critical" or "important"
-- "category": "error-handling"
-- "observation": string (what error handling exists and why it's problematic)
-- "rule": string (the standard being violated, e.g. "Never silently fail in production code")
-- "suggestion": string (specific code change with example)
+- "confidence": integer (80-100)
+- "comment": string (the full human-readable comment)
 
-If no silent failure issues found, return:
-[]
+If no issues found, return: []
 
 Return ONLY the JSON array."""
 
@@ -152,21 +147,24 @@ def parse_json_review(raw: str, file_path: str) -> list:
         if confidence < 80:
             continue
 
-        body_parts = []
-        if item.get("observation"):
-            body_parts.append(item["observation"])
-        if item.get("rule"):
-            body_parts.append(f'Per our standards: "{item["rule"]}"')
-        if item.get("suggestion"):
-            body_parts.append(f"Suggestion: {item['suggestion']}")
+        # Support both new format ("comment") and old format ("observation"/"rule"/"suggestion")
+        if item.get("comment"):
+            body = item["comment"]
+        else:
+            body_parts = []
+            if item.get("observation"):
+                body_parts.append(item["observation"])
+            if item.get("rule"):
+                body_parts.append(f'Per our standards: "{item["rule"]}"')
+            if item.get("suggestion"):
+                body_parts.append(f"Suggestion: {item['suggestion']}")
+            body = "\n".join(body_parts)
 
         comments.append({
             "file": file_path,
             "line": item.get("line", 0),
             "confidence": confidence,
-            "severity": item.get("severity", "important"),
-            "category": item.get("category", "suggestion"),
-            "body": "\n".join(body_parts),
+            "body": body,
         })
 
     return comments
@@ -243,8 +241,7 @@ def review_file(
     )
     if result.returncode != 0:
         return [{"file": file_path, "line": 0, "confidence": 100,
-                 "severity": "critical", "category": "error",
-                 "body": f"Review failed: exit={result.returncode} stderr={result.stderr[:500]}"}]
+                                  "body": f"Review failed: exit={result.returncode} stderr={result.stderr[:500]}"}]
 
     comments = parse_json_review(result.stdout, file_path)
 
@@ -314,13 +311,12 @@ def review_mr_files(
                 except Exception as e:
                     all_comments.append({
                         "file": path, "line": 0, "confidence": 100,
-                        "severity": "critical", "category": "error",
-                        "body": str(e),
+                                                "body": str(e),
                     })
 
     # Sort by severity (critical first) then confidence (highest first)
-    severity_order = {"critical": 0, "important": 1}
-    all_comments.sort(key=lambda c: (severity_order.get(c.get("severity", "important"), 1), -c.get("confidence", 0)))
+    # Sort by confidence (highest first), then by file
+    all_comments.sort(key=lambda c: (-c.get("confidence", 0), c.get("file", "")))
 
     return all_comments
 
