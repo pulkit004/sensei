@@ -21,14 +21,142 @@ def init(pat, url):
 @main.command()
 def learn():
     """Scrape your GitLab comments and build a review style profile."""
-    click.echo("learn command - not yet implemented")
+    import gitlab as gl_module
+    from datetime import datetime, timedelta
+    from setu_review.config import load_config
+    from setu_review.learner import (
+        fetch_user_comments,
+        build_style_profile,
+        save_style_profile,
+    )
+
+    config = load_config()
+    click.echo("Connecting to GitLab...")
+    gl = gl_module.Gitlab(config["gitlab_url"], private_token=config["gitlab_pat"])
+    gl.auth()
+
+    since = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    click.echo(f"Fetching comments since {since}...")
+    comments = fetch_user_comments(gl, config["username"], since)
+    click.echo(f"Found {len(comments)} comments.")
+
+    if not comments:
+        click.echo("No comments found. Nothing to learn from.")
+        return
+
+    click.echo("Analyzing your review style with Claude...")
+    profile = build_style_profile(comments)
+    path = save_style_profile(profile)
+    click.echo(f"Style profile saved to {path}")
 
 
 @main.command()
 @click.argument("mr_url")
-def review(mr_url):
+@click.option("--dry-run", is_flag=True, help="Show review without posting option")
+def review(mr_url, dry_run):
     """Review a GitLab Merge Request."""
-    click.echo(f"review command for {mr_url} - not yet implemented")
+    from setu_review.config import load_config
+    from setu_review.gitlab_client import parse_mr_url, GitLabClient
+    from setu_review.reviewer import (
+        review_mr_files,
+        load_style_profile,
+        load_project_rules,
+        load_project_rules_from_repo,
+    )
+    from setu_review.formatter import format_review, format_for_gitlab
+
+    config = load_config()
+    project_path, mr_iid = parse_mr_url(mr_url)
+
+    click.echo(f"Fetching MR !{mr_iid} from {project_path}...")
+    client = GitLabClient(config["gitlab_url"], config["gitlab_pat"])
+    mr_data = client.get_mr_diff(project_path, mr_iid)
+
+    click.echo(f"MR: {mr_data['title']}")
+    click.echo(f"Files changed: {len(mr_data['files'])}")
+
+    # Fetch full file contents for context
+    click.echo("Fetching file contents...")
+    file_contents = {}
+    for f in mr_data["files"]:
+        if not f["deleted_file"]:
+            content = client.get_file_content(
+                project_path, f["new_path"], mr_data["source_branch"]
+            )
+            file_contents[f["new_path"]] = content
+
+    # Load review context
+    style_profile = load_style_profile()
+    project_rules = load_project_rules(project_path)
+
+    # Fetch rules from the repo itself (CLAUDE.md, etc.)
+    repo_rules = load_project_rules_from_repo(
+        client, project_path, mr_data["target_branch"]
+    )
+    if repo_rules:
+        project_rules = f"{project_rules}\n\n{repo_rules}" if project_rules else repo_rules
+
+    mr_context = (
+        f"Title: {mr_data['title']}\n"
+        f"Description: {mr_data['description']}\n"
+        f"Author: {mr_data['author']}"
+    )
+
+    # Review
+    click.echo("Reviewing files with Claude...")
+    comments = review_mr_files(
+        files=mr_data["files"],
+        file_contents=file_contents,
+        style_profile=style_profile,
+        project_rules=project_rules,
+        mr_context=mr_context,
+        batch_size=config.get("batch_size", 30),
+    )
+
+    # Display
+    click.echo("\n" + "=" * 60)
+    click.echo(format_review(comments))
+    click.echo("=" * 60)
+
+    if not comments or dry_run:
+        return
+
+    # Approval flow
+    action = click.prompt(
+        "\nAction", type=click.Choice(["approve", "edit", "discard"]), default="discard"
+    )
+
+    if action == "approve":
+        click.echo("Posting review to GitLab...")
+        body = format_for_gitlab(comments)
+        client.post_mr_comment(project_path, mr_iid, body)
+        click.echo("Review posted!")
+    elif action == "edit":
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(format_for_gitlab(comments))
+            tmp_path = tmp.name
+        click.echo(f"Review saved to {tmp_path} — edit it, then run:")
+        click.echo(f"  setu-review post {mr_url} {tmp_path}")
+    else:
+        click.echo("Review discarded.")
+
+
+@main.command()
+@click.argument("mr_url")
+@click.argument("review_file", type=click.Path(exists=True))
+def post(mr_url, review_file):
+    """Post an edited review file to a GitLab MR."""
+    from setu_review.config import load_config
+    from setu_review.gitlab_client import parse_mr_url, GitLabClient
+
+    config = load_config()
+    project_path, mr_iid = parse_mr_url(mr_url)
+    body = Path(review_file).read_text()
+
+    client = GitLabClient(config["gitlab_url"], config["gitlab_pat"])
+    client.post_mr_comment(project_path, mr_iid, body)
+    click.echo("Review posted!")
 
 
 if __name__ == "__main__":
