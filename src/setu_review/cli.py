@@ -127,10 +127,28 @@ def review(mr_url, dry_run):
     )
 
     if action == "approve":
-        click.echo("Posting review to GitLab...")
-        body = format_for_gitlab(comments)
-        client.post_mr_comment(project_path, mr_iid, body)
-        click.echo("Review posted!")
+        click.echo("Posting inline comments to GitLab...")
+        posted = 0
+        failed = 0
+        for c in comments:
+            if c["line"] == 0:
+                continue
+            try:
+                client.post_inline_comment(
+                    project_path=project_path,
+                    mr_iid=mr_iid,
+                    file_path=c["file"],
+                    new_line=c["line"],
+                    body=f"**[{c['category']}]** {c['body']}",
+                    base_sha=mr_data["base_sha"],
+                    head_sha=mr_data["head_sha"],
+                    start_sha=mr_data["start_sha"],
+                )
+                posted += 1
+            except Exception as e:
+                failed += 1
+                click.echo(f"  Failed to post on {c['file']}:L{c['line']}: {e}")
+        click.echo(f"Posted {posted} inline comments ({failed} failed)")
     elif action == "edit":
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:

@@ -27,6 +27,9 @@ class GitLabClient:
         mr = project.mergerequests.get(mr_iid)
         changes = mr.changes()
 
+        # Get diff refs for inline commenting
+        diff_refs = changes.get("diff_refs", {}) or {}
+
         return {
             "title": mr.title,
             "description": mr.description or "",
@@ -34,6 +37,9 @@ class GitLabClient:
             "target_branch": mr.target_branch,
             "author": mr.author["username"],
             "web_url": mr.web_url,
+            "base_sha": diff_refs.get("base_sha", ""),
+            "head_sha": diff_refs.get("head_sha", ""),
+            "start_sha": diff_refs.get("start_sha", ""),
             "files": [
                 {
                     "old_path": c["old_path"],
