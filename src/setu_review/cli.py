@@ -132,23 +132,32 @@ def review(mr_url, dry_run):
     )
 
     if action == "approve":
-        click.echo("Posting comments to GitLab...")
+        click.echo("Checking for existing comments...")
+        existing = client.get_existing_comments(project_path, mr_iid)
+
         # Build diff line sets per file for validation
         diff_lines_map = {}
         for f in mr_data["files"]:
             if f["diff"]:
                 diff_lines_map[f["new_path"]] = extract_diff_lines(f["diff"])
 
+        click.echo("Posting comments to GitLab...")
         inline_posted = 0
         general_posted = 0
+        skipped = 0
         for c in comments:
             if c["line"] == 0:
                 continue
+
+            # Skip if already posted (inline match by file+line, or body match)
             body = format_inline_comment(c)
+            if (c["file"], c["line"]) in existing or body[:100] in existing:
+                skipped += 1
+                continue
+
             valid_lines = diff_lines_map.get(c["file"], set())
 
             if c["line"] in valid_lines:
-                # Line is in the diff — post inline
                 try:
                     client.post_inline_comment(
                         project_path=project_path,
@@ -173,7 +182,7 @@ def review(mr_url, dry_run):
             except Exception as e:
                 click.echo(f"  Failed: {c['file']}:L{c['line']}: {e}")
 
-        click.echo(f"Posted {inline_posted} inline + {general_posted} general comments")
+        click.echo(f"Posted {inline_posted} inline + {general_posted} general ({skipped} skipped as duplicates)")
     elif action == "edit":
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:

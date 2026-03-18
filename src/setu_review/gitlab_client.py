@@ -84,6 +84,36 @@ class GitLabClient:
         except gitlab.exceptions.GitlabGetError:
             return ""
 
+    def get_existing_comments(self, project_path: str, mr_iid: int) -> set:
+        """Fetch existing comment signatures to avoid duplicates.
+        Returns a set of (file_path, line_number) tuples for inline comments
+        and body hashes for general comments posted by the current user.
+        """
+        project = self.gl.projects.get(project_path)
+        mr = project.mergerequests.get(mr_iid)
+        current_user = self.gl.user.username
+        signatures = set()
+
+        # Check discussions (inline comments)
+        for discussion in mr.discussions.list(per_page=100, iterator=True):
+            for note in discussion.attributes.get("notes", []):
+                if note.get("author", {}).get("username") != current_user:
+                    continue
+                body = note.get("body", "")
+                pos = note.get("position")
+                if pos and pos.get("new_path") and pos.get("new_line"):
+                    signatures.add((pos["new_path"], pos["new_line"]))
+                # Also track general comments by first 100 chars
+                signatures.add(body[:100])
+
+        # Check notes (general comments)
+        for note in mr.notes.list(per_page=100, iterator=True):
+            if note.author.get("username") != current_user:
+                continue
+            signatures.add(note.body[:100])
+
+        return signatures
+
     def post_mr_comment(
         self, project_path: str, mr_iid: int, body: str
     ) -> None:
