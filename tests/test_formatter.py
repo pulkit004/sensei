@@ -1,22 +1,63 @@
-from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment
+from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment, format_nits_summary
 
 
-def test_format_review_groups_by_file():
+def test_format_review_groups_by_type():
     comments = [
-        {"file": "src/a.py", "line": 10, "confidence": 95, "body": "Code Review: Missing null check."},
-        {"file": "src/a.py", "line": 20, "confidence": 82, "body": "Code Review: Use const."},
-        {"file": "src/b.py", "line": 5, "confidence": 88, "body": "Code Review: Rename var."},
+        {"file": "src/a.py", "line": 10, "confidence": 95, "type": "must", "body": "Code Review: Missing null check."},
+        {"file": "src/a.py", "line": 20, "confidence": 82, "type": "nit", "body": "Code Review: Use const."},
+        {"file": "src/b.py", "line": 5, "confidence": 88, "type": "nit", "body": "Code Review: Rename var."},
     ]
     output = format_review(comments)
+    assert "MUST FIX (posted inline):" in output
+    assert "NITS (posted as summary):" in output
     assert "src/a.py" in output
     assert "src/b.py" in output
     assert "3 comment(s)" in output
     assert "2 file(s)" in output
 
 
+def test_format_review_only_musts():
+    comments = [
+        {"file": "src/a.py", "line": 10, "confidence": 95, "type": "must", "body": "Code Review: Bug."},
+    ]
+    output = format_review(comments)
+    assert "MUST FIX" in output
+    assert "NITS" not in output
+
+
+def test_format_review_only_nits():
+    comments = [
+        {"file": "src/a.py", "line": 10, "confidence": 82, "type": "nit", "body": "Code Review: Style."},
+    ]
+    output = format_review(comments)
+    assert "NITS" in output
+    assert "MUST FIX" not in output
+
+
 def test_format_review_empty():
     output = format_review([])
     assert "LGTM" in output
+
+
+def test_format_nits_summary():
+    nits = [
+        {"file": "src/a.py", "line": 10, "confidence": 82, "type": "nit", "body": "Code Review: Use const instead of let."},
+        {"file": "src/a.py", "line": 30, "confidence": 85, "type": "nit", "body": "Code Review: Rename variable."},
+        {"file": "src/b.py", "line": 20, "confidence": 83, "type": "nit", "body": "Code Review: Add docstring."},
+    ]
+    output = format_nits_summary(nits)
+    assert "## Nits" in output
+    assert "### `src/a.py`" in output
+    assert "### `src/b.py`" in output
+    assert "**L10:**" in output
+    assert "**L30:**" in output
+    assert "**L20:**" in output
+    assert "Use const" in output
+
+
+def test_format_nits_summary_empty():
+    output = format_nits_summary([])
+    assert output == ""
 
 
 def test_format_for_gitlab_produces_markdown():
@@ -29,7 +70,7 @@ def test_format_for_gitlab_produces_markdown():
 
 
 def test_format_inline_comment_is_just_the_body():
-    comment = {"body": "Code Review: Missing null check.\nPer our standards: \"Validate inputs.\"\nSuggestion: Add guard clause."}
+    comment = {"body": "Code Review: Missing null check.\nSuggestion: Add guard clause."}
     result = format_inline_comment(comment)
     assert result == comment["body"]
     assert "Code Review:" in result

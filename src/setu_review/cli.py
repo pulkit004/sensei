@@ -64,7 +64,7 @@ def review(mr_url, dry_run):
         load_project_rules,
         load_project_rules_from_repo,
     )
-    from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment
+    from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment, format_nits_summary
 
     config = load_config()
     try:
@@ -141,15 +141,19 @@ def review(mr_url, dry_run):
             if f["diff"]:
                 diff_lines_map[f["new_path"]] = extract_diff_lines(f["diff"])
 
+        # Split comments into must-fix and nits
+        musts = [c for c in comments if c.get("type") != "nit"]
+        nits = [c for c in comments if c.get("type") == "nit"]
+
         click.echo("Posting comments to GitLab...")
         inline_posted = 0
-        general_posted = 0
         skipped = 0
-        for c in comments:
+
+        # Post must-fix comments as inline
+        for c in musts:
             if c["line"] == 0:
                 continue
 
-            # Skip if already posted (inline match by file+line, or body match)
             body = format_inline_comment(c)
             if (c["file"], c["line"]) in existing or body[:100] in existing:
                 skipped += 1
@@ -178,11 +182,21 @@ def review(mr_url, dry_run):
             file_body = f"**`{c['file']}` L{c['line']}**\n\n{body}"
             try:
                 client.post_mr_comment(project_path, mr_iid, file_body)
-                general_posted += 1
+                inline_posted += 1
             except Exception as e:
                 click.echo(f"  Failed: {c['file']}:L{c['line']}: {e}")
 
-        click.echo(f"Posted {inline_posted} inline + {general_posted} general ({skipped} skipped as duplicates)")
+        # Post all nits as one summary comment
+        nits_posted = 0
+        if nits:
+            nits_body = format_nits_summary(nits)
+            try:
+                client.post_mr_comment(project_path, mr_iid, nits_body)
+                nits_posted = 1
+            except Exception as e:
+                click.echo(f"  Failed posting nits summary: {e}")
+
+        click.echo(f"Posted {inline_posted} must-fix inline + {nits_posted} nits summary ({skipped} skipped)")
     elif action == "edit":
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:

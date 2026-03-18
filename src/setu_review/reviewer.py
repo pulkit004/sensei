@@ -46,31 +46,29 @@ def build_file_review_prompt(
 
 ## Writing style for comments
 
-Write each comment like a thoughtful human colleague — concise, scannable, empathetic. Follow this exact structure:
+Write each comment like a thoughtful human colleague — concise, scannable, empathetic. Keep it SHORT.
 
 EXAMPLE:
 
-"Code Review: This block adds ~36 lines of `!important` overrides using fragile `[class*="setu:..."]` attribute selectors.
-While understandable as a migration shim, this is a maintenance risk:
+"Code Review: `user` param is not null-checked before `.name` access.
 
-• Attribute substring matching is brittle and can match unintended classes
-• `!important` makes future CSS changes difficult to reason about
+• Crashes at runtime if caller passes undefined
 
-Suggestion: Add a `// TODO(BRIDGE-XXXX)`: Remove badge compatibility overrides once @setu/components Badge stabilizes comment with a tracking ticket so this doesn't become permanent technical debt."
+Suggestion: Add a guard clause: `if (!user) return null;`"
 
 RULES:
-1. Start with "Code Review:" — one short sentence describing what you observe. Be specific (use actual names, values).
-2. Acknowledge intent with "While understandable as [context], this is a [risk type]:" — show empathy, then name the risk.
-3. Use bullet points (•) for the specific issues — keep each bullet to one line, scannable.
-4. End with "Suggestion:" — one concrete, actionable fix in 1-2 sentences.
-5. Keep the whole comment SHORT. If you can say it in 3 bullets, don't write 5.
-6. Only flag issues you're genuinely confident about (>= 80%). Skip nitpicks.
+1. Start with "Code Review:" — ONE short sentence, max 15 words. Be specific (use actual names, values).
+2. 1-2 bullet points (•) max for the specific issues — one line each.
+3. End with "Suggestion:" — one concrete, actionable sentence.
+4. Only flag issues you're genuinely confident about (>= 80%).
+5. Keep entire comment to 4-6 lines. If you need more than 2 bullets, you're overexplaining.
 
 ## Output Format
 
 Return a valid JSON array. Each element:
 - "line": integer (line number in the new file)
 - "confidence": integer (80-100, used internally — not shown in comment)
+- "type": "must" or "nit" — "must" for confidence >= 90 (bugs, missing tests, security, rule violations), "nit" for confidence 80-89 (naming, style, suggestions, nice-to-haves)
 - "comment": string (the full human-readable comment as described above)
 
 If the changes look good, return: []
@@ -112,19 +110,19 @@ def build_silent_failure_prompt(
 
 ## Writing style
 
-Use this structure:
-1. "Code Review:" — short observation sentence
-2. "While understandable as [context], this is a [risk]:" — acknowledge intent, name the risk
-3. Bullet points (•) for specific issues — one line each, scannable
-4. "Suggestion:" — concrete fix in 1-2 sentences
-
-Keep it short. Only flag issues >= 80% confidence.
+RULES:
+1. "Code Review:" — ONE short sentence, max 15 words. Be specific.
+2. 1-2 bullet points (•) max — one line each.
+3. "Suggestion:" — one concrete, actionable sentence.
+4. Only flag issues >= 80% confidence.
+5. Keep entire comment to 4-6 lines. If you need more than 2 bullets, you're overexplaining.
 
 ## Output Format
 
 Return a valid JSON array. Each element:
 - "line": integer
 - "confidence": integer (80-100)
+- "type": "must" or "nit" — "must" for confidence >= 90 (bugs, security, missing error handling), "nit" for confidence 80-89 (style, suggestions)
 - "comment": string (the full human-readable comment)
 
 If no issues found, return: []
@@ -168,10 +166,14 @@ def parse_json_review(raw: str, file_path: str) -> list:
                 body_parts.append(f"Suggestion: {item['suggestion']}")
             body = "\n".join(body_parts)
 
+        # Determine type: "must" for confidence >= 90, "nit" for 80-89
+        comment_type = item.get("type", "must" if confidence >= 90 else "nit")
+
         comments.append({
             "file": file_path,
             "line": item.get("line", 0),
             "confidence": confidence,
+            "type": comment_type,
             "body": body,
         })
 

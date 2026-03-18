@@ -15,6 +15,7 @@ def test_build_file_review_prompt_includes_diff():
     assert "readability" in prompt
     assert "type hints" in prompt
     assert "Code Review:" in prompt  # example format
+    assert '"type"' in prompt  # new type field in output format
 
 
 def test_parse_json_review_new_format():
@@ -22,20 +23,35 @@ def test_parse_json_review_new_format():
         {
             "line": 12,
             "confidence": 92,
-            "comment": "Code Review: The `user` parameter is not null-checked before accessing `.name`.\\nPer our standards: \\"Do not mutate input parameters.\\"\\nSuggestion: Add a guard clause: `if (!user) return null;`"
+            "type": "must",
+            "comment": "Code Review: The `user` parameter is not null-checked before accessing `.name`.\\n\\n\\u2022 Crashes at runtime if caller passes undefined\\n\\nSuggestion: Add a guard clause: `if (!user) return null;`"
         },
         {
             "line": 45,
             "confidence": 85,
-            "comment": "Code Review: Nested if/else adds unnecessary complexity.\\nPer our standards: \\"Prefer early returns over else.\\"\\nSuggestion: Use an early return for the falsy case."
+            "type": "nit",
+            "comment": "Code Review: Nested if/else adds unnecessary complexity.\\n\\n\\u2022 Prefer early returns over else\\n\\nSuggestion: Use an early return for the falsy case."
         }
     ]'''
     comments = parse_json_review(raw, "src/auth.py")
     assert len(comments) == 2
     assert comments[0]["line"] == 12
     assert comments[0]["confidence"] == 92
+    assert comments[0]["type"] == "must"
     assert "Code Review:" in comments[0]["body"]
-    assert "Per our standards" in comments[1]["body"]
+    assert comments[1]["type"] == "nit"
+
+
+def test_parse_json_review_type_defaults_by_confidence():
+    """When type field is missing, it defaults based on confidence threshold."""
+    raw = '''[
+        {"line": 10, "confidence": 95, "comment": "Code Review: Bug found."},
+        {"line": 20, "confidence": 82, "comment": "Code Review: Style issue."}
+    ]'''
+    comments = parse_json_review(raw, "src/foo.py")
+    assert len(comments) == 2
+    assert comments[0]["type"] == "must"  # confidence 95 >= 90
+    assert comments[1]["type"] == "nit"   # confidence 82 < 90
 
 
 def test_parse_json_review_old_format_compat():
@@ -52,6 +68,7 @@ def test_parse_json_review_old_format_compat():
     assert len(comments) == 1
     assert "Real bug" in comments[0]["body"]
     assert "Per our standards" in comments[0]["body"]
+    assert comments[0]["type"] == "must"  # confidence 90 >= 90
 
 
 def test_parse_json_review_filters_low_confidence():
@@ -71,10 +88,11 @@ def test_parse_json_review_empty_array():
 
 def test_parse_json_review_handles_markdown_wrapped():
     raw = '''```json
-    [{"line": 5, "confidence": 85, "comment": "Code Review: Bad name."}]
+    [{"line": 5, "confidence": 85, "type": "nit", "comment": "Code Review: Bad name."}]
     ```'''
     comments = parse_json_review(raw, "src/foo.py")
     assert len(comments) == 1
+    assert comments[0]["type"] == "nit"
 
 
 def test_parse_review_output_lgtm():
