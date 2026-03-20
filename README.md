@@ -25,7 +25,7 @@ pip install sensei-review
 Or from source:
 
 ```bash
-git clone https://github.com/pulkitverma25/sensei.git && cd sensei
+git clone https://github.com/pulkit004/sensei.git && cd sensei
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
