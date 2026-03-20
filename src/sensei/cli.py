@@ -14,7 +14,7 @@ def main():
 @click.option("--username", default="", help="GitLab username (auto-detected if omitted)")
 def init(pat, url, username):
     """Initialize Sensei with your GitLab credentials."""
-    from setu_review.config import init_config
+    from sensei.config import init_config
     config = init_config(gitlab_pat=pat, gitlab_url=url, username=username)
     click.echo(f"Config saved to ~/.sensei/config.yaml (user: {config['username']})")
 
@@ -24,8 +24,8 @@ def learn():
     """Scrape your GitLab comments and build a review style profile."""
     import gitlab as gl_module
     from datetime import datetime, timedelta
-    from setu_review.config import load_config
-    from setu_review.learner import (
+    from sensei.config import load_config
+    from sensei.learner import (
         fetch_user_comments,
         build_style_profile,
         save_style_profile,
@@ -56,15 +56,16 @@ def learn():
 @click.option("--dry-run", is_flag=True, help="Show review without posting option")
 def review(mr_url, dry_run):
     """Review a GitLab Merge Request."""
-    from setu_review.config import load_config
-    from setu_review.gitlab_client import parse_mr_url, GitLabClient, extract_diff_lines
-    from setu_review.reviewer import (
+    from sensei.config import load_config
+    from sensei.gitlab_client import parse_mr_url, GitLabClient, extract_diff_lines
+    from sensei.reviewer import (
         review_mr_files,
+        consolidate_test_comments,
         load_style_profile,
         load_project_rules,
         load_project_rules_from_repo,
     )
-    from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment, format_nits_summary
+    from sensei.formatter import format_review, format_for_gitlab, format_inline_comment, format_nits_summary
 
     config = load_config()
     try:
@@ -109,7 +110,7 @@ def review(mr_url, dry_run):
 
     # Review
     click.echo("Reviewing files with Claude...")
-    comments = review_mr_files(
+    all_comments = review_mr_files(
         files=mr_data["files"],
         file_contents=file_contents,
         style_profile=style_profile,
@@ -118,12 +119,15 @@ def review(mr_url, dry_run):
         batch_size=config.get("batch_size", 30),
     )
 
+    # Consolidate test-gap comments into a single summary
+    comments, test_summary = consolidate_test_comments(all_comments)
+
     # Display
     click.echo("\n" + "=" * 60)
-    click.echo(format_review(comments))
+    click.echo(format_review(comments, test_summary))
     click.echo("=" * 60)
 
-    if not comments or dry_run:
+    if (not comments and not test_summary) or dry_run:
         return
 
     # Approval flow
@@ -196,7 +200,23 @@ def review(mr_url, dry_run):
             except Exception as e:
                 click.echo(f"  Failed posting nits summary: {e}")
 
-        click.echo(f"Posted {inline_posted} must-fix inline + {nits_posted} nits summary ({skipped} skipped)")
+        # Post test coverage summary as one comment
+        test_posted = 0
+        if test_summary:
+            try:
+                client.post_mr_comment(project_path, mr_iid, test_summary)
+                test_posted = 1
+            except Exception as e:
+                click.echo(f"  Failed posting test summary: {e}")
+
+        parts = [f"{inline_posted} must-fix inline"]
+        if nits_posted:
+            parts.append(f"{nits_posted} nits summary")
+        if test_posted:
+            parts.append(f"{test_posted} test coverage summary")
+        if skipped:
+            parts.append(f"{skipped} skipped")
+        click.echo(f"Posted {' + '.join(parts)}")
     elif action == "edit":
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
@@ -213,8 +233,8 @@ def review(mr_url, dry_run):
 @click.argument("review_file", type=click.Path(exists=True))
 def post(mr_url, review_file):
     """Post an edited review file to a GitLab MR."""
-    from setu_review.config import load_config
-    from setu_review.gitlab_client import parse_mr_url, GitLabClient
+    from sensei.config import load_config
+    from sensei.gitlab_client import parse_mr_url, GitLabClient
 
     config = load_config()
     project_path, mr_iid = parse_mr_url(mr_url)

@@ -1,13 +1,14 @@
 from itertools import groupby
 from operator import itemgetter
+from typing import Optional
 
 
-def format_review(comments: list) -> str:
+def format_review(comments: list, test_summary: Optional[str] = None) -> str:
     """Format comments for terminal display, grouped by type."""
-    if not comments:
+    if not comments and not test_summary:
         return "No comments - LGTM!"
 
-    musts = [c for c in comments if c.get("type") != "nit"]
+    musts = [c for c in comments if c.get("type") not in ("nit", "test")]
     nits = [c for c in comments if c.get("type") == "nit"]
 
     lines = []
@@ -34,7 +35,11 @@ def format_review(comments: list) -> str:
                 for body_line in c["body"].splitlines():
                     lines.append(f"    {body_line}")
 
-    lines.append(f"\n{len(comments)} comment(s) across {_count_files(comments)} file(s)")
+    if test_summary:
+        lines.append("\n" + test_summary)
+
+    total = len(comments) + (1 if test_summary else 0)
+    lines.append(f"\n{total} comment(s) across {_count_files(comments)} file(s)")
     return "\n".join(lines)
 
 

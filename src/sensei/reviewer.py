@@ -2,7 +2,7 @@ import json
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from setu_review.config import CONFIG_DIR
+from sensei.config import CONFIG_DIR
 
 
 def build_file_review_prompt(
@@ -40,9 +40,13 @@ def build_file_review_prompt(
 - Bugs, type safety issues, implicit `any`
 - Silent failures, swallowed errors, fallbacks that hide problems
 - Naming inconsistencies, missing conventions
-- Missing tests for new logic
 - Security issues, environment misconfigs
 - Architecture violations (cross-layer leakage, duplication across packages)
+
+## Test coverage gaps
+If the diff adds or changes logic that has no corresponding test, emit a SEPARATE entry with `"type": "test"`. Do NOT write a full comment — just state what needs testing in one line.
+Example: `{{"line": 42, "confidence": 92, "type": "test", "comment": "New `redirectToOnboarding` logic needs tests for different productType/accountId combos"}}`
+Do NOT emit per-file "missing tests" comments as "must" or "nit" — use "test" type ONLY. These will be consolidated into a single test summary.
 
 ## Writing style for comments
 
@@ -68,8 +72,8 @@ RULES:
 Return a valid JSON array. Each element:
 - "line": integer (line number in the new file)
 - "confidence": integer (80-100, used internally — not shown in comment)
-- "type": "must" or "nit" — "must" for confidence >= 90 (bugs, missing tests, security, rule violations), "nit" for confidence 80-89 (naming, style, suggestions, nice-to-haves)
-- "comment": string (the full human-readable comment as described above)
+- "type": "must", "nit", or "test" — "must" for confidence >= 90 (bugs, security, rule violations), "nit" for confidence 80-89 (naming, style, suggestions), "test" for missing test coverage (these get consolidated into one summary, not posted inline)
+- "comment": string (the full human-readable comment as described above; for "test" type, just a one-line description of what needs testing)
 
 If the changes look good, return: []
 
@@ -166,8 +170,12 @@ def parse_json_review(raw: str, file_path: str) -> list:
                 body_parts.append(f"Suggestion: {item['suggestion']}")
             body = "\n".join(body_parts)
 
-        # Determine type: "must" for confidence >= 90, "nit" for 80-89
-        comment_type = item.get("type", "must" if confidence >= 90 else "nit")
+        # Determine type: "test" preserved as-is, else "must" >= 90, "nit" 80-89
+        raw_type = item.get("type", "")
+        if raw_type == "test":
+            comment_type = "test"
+        else:
+            comment_type = raw_type if raw_type in ("must", "nit") else ("must" if confidence >= 90 else "nit")
 
         comments.append({
             "file": file_path,
@@ -324,11 +332,64 @@ def review_mr_files(
                                                 "body": str(e),
                     })
 
-    # Sort by severity (critical first) then confidence (highest first)
     # Sort by confidence (highest first), then by file
     all_comments.sort(key=lambda c: (-c.get("confidence", 0), c.get("file", "")))
 
     return all_comments
+
+
+def consolidate_test_comments(comments: list) -> tuple:
+    """Separate test-gap comments from review comments and build a summary.
+
+    Returns (review_comments, test_summary_comment_or_none).
+    """
+    review = [c for c in comments if c.get("type") != "test"]
+    test_gaps = [c for c in comments if c.get("type") == "test"]
+
+    if not test_gaps:
+        return review, None
+
+    # Group by file, deduplicate similar descriptions
+    from itertools import groupby
+    from operator import itemgetter
+
+    sorted_gaps = sorted(test_gaps, key=itemgetter("file"))
+    rows = []
+    for file_path, file_comments in groupby(sorted_gaps, key=itemgetter("file")):
+        for c in file_comments:
+            rows.append((file_path, c.get("body", c.get("comment", ""))))
+
+    # Deduplicate rows with near-identical descriptions (same file, same first 60 chars)
+    seen = set()
+    unique_rows = []
+    for file_path, desc in rows:
+        key = (file_path, desc[:60])
+        if key not in seen:
+            seen.add(key)
+            unique_rows.append((file_path, desc))
+
+    # Build markdown table
+    lines = [
+        "## Test Coverage Summary",
+        "",
+        "This MR adds/changes logic without corresponding tests. "
+        "Target ~80% coverage for new code. Key areas needing tests:",
+        "",
+        "| Area | What to test |",
+        "|---|---|",
+    ]
+    for file_path, desc in unique_rows:
+        # Use short filename for readability
+        short = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+        lines.append(f"| `{short}` | {desc} |")
+
+    lines.append("")
+    lines.append(
+        "If multiple files share the same pattern (e.g., identical prop wiring), "
+        "one well-tested example + replication is fine — focus depth on unique logic."
+    )
+
+    return review, "\n".join(lines)
 
 
 def load_style_profile() -> str:

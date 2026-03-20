@@ -1,4 +1,4 @@
-from setu_review.reviewer import build_file_review_prompt, parse_json_review, parse_review_output, load_project_rules_from_repo, _has_error_handling
+from sensei.reviewer import build_file_review_prompt, parse_json_review, parse_review_output, consolidate_test_comments, load_project_rules_from_repo, _has_error_handling
 
 
 def test_build_file_review_prompt_includes_diff():
@@ -107,6 +107,60 @@ def test_has_error_handling_detects_patterns():
     assert _has_error_handling("user?.name")
     assert _has_error_handling("value ?? fallback")
     assert not _has_error_handling("const x = 1 + 2;")
+
+
+def test_parse_json_review_preserves_test_type():
+    """Test type comments are preserved as 'test' and not coerced to must/nit."""
+    raw = '''[
+        {"line": 42, "confidence": 92, "type": "test", "comment": "New redirect logic needs tests"},
+        {"line": 10, "confidence": 95, "type": "must", "comment": "Code Review: Bug."}
+    ]'''
+    comments = parse_json_review(raw, "src/foo.py")
+    assert len(comments) == 2
+    assert comments[0]["type"] == "test"
+    assert comments[1]["type"] == "must"
+
+
+def test_consolidate_test_comments_separates_types():
+    comments = [
+        {"file": "src/a.py", "line": 10, "type": "must", "body": "Bug found"},
+        {"file": "src/a.py", "line": 20, "type": "test", "body": "Needs tests for redirect logic"},
+        {"file": "src/b.py", "line": 5, "type": "nit", "body": "Rename var"},
+        {"file": "src/b.py", "line": 15, "type": "test", "body": "Missing test for error handler"},
+    ]
+    review, test_summary = consolidate_test_comments(comments)
+
+    # Review comments should not contain test type
+    assert len(review) == 2
+    assert all(c["type"] != "test" for c in review)
+
+    # Test summary should be a markdown string with table
+    assert test_summary is not None
+    assert "## Test Coverage Summary" in test_summary
+    assert "~80%" in test_summary
+    assert "redirect logic" in test_summary
+    assert "error handler" in test_summary
+
+
+def test_consolidate_test_comments_no_test_gaps():
+    comments = [
+        {"file": "src/a.py", "line": 10, "type": "must", "body": "Bug found"},
+    ]
+    review, test_summary = consolidate_test_comments(comments)
+    assert len(review) == 1
+    assert test_summary is None
+
+
+def test_consolidate_test_comments_deduplicates():
+    comments = [
+        {"file": "src/a.py", "line": 10, "type": "test", "body": "Needs tests for redirect logic with different params"},
+        {"file": "src/a.py", "line": 20, "type": "test", "body": "Needs tests for redirect logic with different params"},
+    ]
+    review, test_summary = consolidate_test_comments(comments)
+    assert len(review) == 0
+    assert test_summary is not None
+    # Should only have one row for the deduplicated entry
+    assert test_summary.count("redirect logic") == 1
 
 
 def test_load_project_rules_from_repo_returns_string():

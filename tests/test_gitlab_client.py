@@ -1,27 +1,27 @@
-from setu_review.gitlab_client import parse_mr_url, extract_diff_lines
+from sensei.gitlab_client import parse_mr_url, extract_diff_lines
 
 
 def test_parse_mr_url_standard():
     project, mr_iid = parse_mr_url(
-        "https://gitlab.com/brokentusk/facade/ashpd/-/merge_requests/123"
+        "https://gitlab.com/acme/widgets/backend/-/merge_requests/123"
     )
-    assert project == "brokentusk/facade/ashpd"
+    assert project == "acme/widgets/backend"
     assert mr_iid == 123
 
 
 def test_parse_mr_url_with_trailing_slash():
     project, mr_iid = parse_mr_url(
-        "https://gitlab.com/brokentusk/facade/ashpd/-/merge_requests/123/"
+        "https://gitlab.com/acme/widgets/backend/-/merge_requests/123/"
     )
-    assert project == "brokentusk/facade/ashpd"
+    assert project == "acme/widgets/backend"
     assert mr_iid == 123
 
 
 def test_parse_mr_url_nested_group():
     project, mr_iid = parse_mr_url(
-        "https://gitlab.com/brokentusk/facade/docs-mdx/-/merge_requests/45"
+        "https://gitlab.com/acme/widgets/docs-site/-/merge_requests/45"
     )
-    assert project == "brokentusk/facade/docs-mdx"
+    assert project == "acme/widgets/docs-site"
     assert mr_iid == 45
 
 

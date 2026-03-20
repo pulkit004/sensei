@@ -3,18 +3,42 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sensei"
+name = "sensei-review"
 version = "0.1.0"
-description = "CLI code review agent for GitLab MRs"
+description = "AI-powered code review CLI for GitLab MRs — learns your style, reviews like you."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Pulkit Verma"}]
 requires-python = ">=3.9"
+keywords = ["code-review", "gitlab", "claude", "ai", "merge-request", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "click>=8.1",
     "python-gitlab>=4.0",
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/pulkitverma25/sensei"
+Repository = "https://github.com/pulkitverma25/sensei"
+Issues = "https://github.com/pulkitverma25/sensei/issues"
+
 [project.scripts]
-sensei = "setu_review.cli:main"
+sensei = "sensei.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "build>=1.0", "twine>=5.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

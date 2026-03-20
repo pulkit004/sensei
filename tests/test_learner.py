@@ -1,4 +1,4 @@
-from setu_review.learner import chunk_comments, build_analysis_prompt
+from sensei.learner import chunk_comments, build_analysis_prompt
 
 
 def test_chunk_comments_respects_batch_size():

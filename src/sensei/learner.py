@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 import gitlab
-from setu_review.config import CONFIG_DIR
+from sensei.config import CONFIG_DIR
 
 
 def fetch_user_comments(gl: gitlab.Gitlab, username: str, since: str) -> list:

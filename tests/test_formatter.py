@@ -1,4 +1,4 @@
-from setu_review.formatter import format_review, format_for_gitlab, format_inline_comment, format_nits_summary
+from sensei.formatter import format_review, format_for_gitlab, format_inline_comment, format_nits_summary
 
 
 def test_format_review_groups_by_type():
@@ -67,6 +67,28 @@ def test_format_for_gitlab_produces_markdown():
     md = format_for_gitlab(comments)
     assert "src/a.py" in md
     assert "Missing check" in md
+
+
+def test_format_review_with_test_summary():
+    comments = [
+        {"file": "src/a.py", "line": 10, "confidence": 95, "type": "must", "body": "Code Review: Bug."},
+    ]
+    test_summary = "## Test Coverage Summary\n\nSome areas need tests."
+    output = format_review(comments, test_summary)
+    assert "MUST FIX" in output
+    assert "## Test Coverage Summary" in output
+    assert "2 comment(s)" in output  # 1 must + 1 test summary
+
+
+def test_format_review_excludes_test_type_from_sections():
+    """Test type comments should not appear in MUST FIX or NITS sections."""
+    comments = [
+        {"file": "src/a.py", "line": 10, "confidence": 95, "type": "must", "body": "Code Review: Bug."},
+        {"file": "src/a.py", "line": 20, "confidence": 92, "type": "test", "body": "Needs tests"},
+    ]
+    output = format_review(comments)
+    # test type shouldn't appear in MUST FIX or NITS
+    assert "Needs tests" not in output
 
 
 def test_format_inline_comment_is_just_the_body():

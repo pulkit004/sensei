@@ -1,5 +1,5 @@
 from click.testing import CliRunner
-from setu_review.cli import main
+from sensei.cli import main
 
 
 def test_review_invalid_url():
