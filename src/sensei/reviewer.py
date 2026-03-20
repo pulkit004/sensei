@@ -258,8 +258,8 @@ def review_file(
         timeout=180,
     )
     if result.returncode != 0:
-        return [{"file": file_path, "line": 0, "confidence": 100,
-                                  "body": f"Review failed: exit={result.returncode} stderr={result.stderr[:500]}"}]
+        return [{"file": file_path, "line": 0, "confidence": 100, "type": "must",
+                 "body": f"Review failed for this file (exit code {result.returncode})."}]
 
     comments = parse_json_review(result.stdout, file_path)
 
@@ -326,10 +326,15 @@ def review_mr_files(
                     all_comments.extend(comments)
                     status = "LGTM" if not comments else f"{len(comments)} comments"
                     print(f"    {path}: {status}")
-                except Exception as e:
+                except subprocess.TimeoutExpired:
                     all_comments.append({
-                        "file": path, "line": 0, "confidence": 100,
-                                                "body": str(e),
+                        "file": path, "line": 0, "confidence": 100, "type": "must",
+                        "body": "Review timed out for this file.",
+                    })
+                except Exception:
+                    all_comments.append({
+                        "file": path, "line": 0, "confidence": 100, "type": "must",
+                        "body": "Review failed unexpectedly for this file.",
                     })
 
     # Sort by confidence (highest first), then by file
@@ -401,8 +406,11 @@ def load_style_profile() -> str:
 
 def load_project_rules(project_path: str) -> str:
     """Try to load project-specific rules from ~/.sensei/rules/."""
-    safe_name = project_path.replace("/", "_")
+    safe_name = project_path.replace("/", "_").replace("..", "")
     rules_file = CONFIG_DIR / "rules" / f"{safe_name}.md"
+    # Ensure resolved path stays within the rules directory
+    if not rules_file.resolve().is_relative_to((CONFIG_DIR / "rules").resolve()):
+        return "No project-specific rules found."
     if rules_file.exists():
         return rules_file.read_text()
     return "No project-specific rules found."

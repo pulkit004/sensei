@@ -8,7 +8,10 @@ CONFIG_DIR = Path.home() / ".sensei"
 def init_config(gitlab_pat: str, gitlab_url: str = "https://gitlab.com", username: str = ""):
     import gitlab
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    (CONFIG_DIR / "rules").mkdir(exist_ok=True)
+    CONFIG_DIR.chmod(0o700)
+    rules_dir = CONFIG_DIR / "rules"
+    rules_dir.mkdir(exist_ok=True)
+    rules_dir.chmod(0o700)
 
     # Derive username from GitLab API if not provided
     if not username:

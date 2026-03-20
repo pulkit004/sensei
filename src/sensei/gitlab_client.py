@@ -26,7 +26,10 @@ def extract_diff_lines(diff: str) -> set:
 
 
 def parse_mr_url(url: str) -> tuple:
-    """Extract project path and MR IID from a GitLab MR URL."""
+    """Extract project path and MR IID from a GitLab MR URL.
+
+    Returns (project_path, mr_iid) tuple.
+    """
     url = url.rstrip("/")
     parsed = urlparse(url)
     match = re.match(
@@ -36,6 +39,16 @@ def parse_mr_url(url: str) -> tuple:
     if not match:
         raise ValueError(f"Invalid MR URL: {url}")
     return match.group(1), int(match.group(2))
+
+
+def validate_mr_url_origin(url: str, configured_url: str) -> None:
+    """Verify MR URL hostname matches the configured GitLab instance."""
+    mr_host = urlparse(url).netloc
+    configured_host = urlparse(configured_url).netloc
+    if mr_host != configured_host:
+        raise ValueError(
+            f"MR URL host ({mr_host}) does not match configured GitLab ({configured_host})."
+        )
 
 
 class GitLabClient:

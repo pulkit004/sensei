@@ -38,8 +38,11 @@ def format_review(comments: list, test_summary: Optional[str] = None) -> str:
     if test_summary:
         lines.append("\n" + test_summary)
 
-    total = len(comments) + (1 if test_summary else 0)
-    lines.append(f"\n{total} comment(s) across {_count_files(comments)} file(s)")
+    file_count = _count_files(comments)
+    if test_summary:
+        lines.append(f"\n{len(comments)} comment(s) across {file_count} file(s) + test coverage summary")
+    else:
+        lines.append(f"\n{len(comments)} comment(s) across {file_count} file(s)")
     return "\n".join(lines)
 
 

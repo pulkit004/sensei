@@ -68,7 +68,7 @@ def analyze_with_claude(prompt: str) -> str:
         timeout=120,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"Claude CLI failed: {result.stderr}")
+        raise RuntimeError(f"Claude CLI failed (exit code {result.returncode}).")
     return result.stdout.strip()
 
 
@@ -108,4 +108,5 @@ def save_style_profile(profile: str) -> Path:
     """Save the style profile to disk."""
     path = CONFIG_DIR / "style-profile.md"
     path.write_text(profile)
+    path.chmod(0o600)
     return path

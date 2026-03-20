@@ -57,7 +57,7 @@ def learn():
 def review(mr_url, dry_run):
     """Review a GitLab Merge Request."""
     from sensei.config import load_config
-    from sensei.gitlab_client import parse_mr_url, GitLabClient, extract_diff_lines
+    from sensei.gitlab_client import parse_mr_url, validate_mr_url_origin, GitLabClient, extract_diff_lines
     from sensei.reviewer import (
         review_mr_files,
         consolidate_test_comments,
@@ -70,6 +70,7 @@ def review(mr_url, dry_run):
     config = load_config()
     try:
         project_path, mr_iid = parse_mr_url(mr_url)
+        validate_mr_url_origin(mr_url, config["gitlab_url"])
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
@@ -146,7 +147,7 @@ def review(mr_url, dry_run):
                 diff_lines_map[f["new_path"]] = extract_diff_lines(f["diff"])
 
         # Split comments into must-fix and nits
-        musts = [c for c in comments if c.get("type") != "nit"]
+        musts = [c for c in comments if c.get("type") == "must"]
         nits = [c for c in comments if c.get("type") == "nit"]
 
         click.echo("Posting comments to GitLab...")
@@ -218,10 +219,12 @@ def review(mr_url, dry_run):
             parts.append(f"{skipped} skipped")
         click.echo(f"Posted {' + '.join(parts)}")
     elif action == "edit":
+        import os
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
             tmp.write(format_for_gitlab(comments))
             tmp_path = tmp.name
+        os.chmod(tmp_path, 0o600)
         click.echo(f"Review saved to {tmp_path} — edit it, then run:")
         click.echo(f"  sensei post {mr_url} {tmp_path}")
     else:

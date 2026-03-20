@@ -77,7 +77,8 @@ def test_format_review_with_test_summary():
     output = format_review(comments, test_summary)
     assert "MUST FIX" in output
     assert "## Test Coverage Summary" in output
-    assert "2 comment(s)" in output  # 1 must + 1 test summary
+    assert "1 comment(s)" in output
+    assert "test coverage summary" in output
 
 
 def test_format_review_excludes_test_type_from_sections():
