@@ -135,7 +135,7 @@ def _review_single_mr(
             progress_callback(mr_iid, project_path, "done")
 
     except Exception as e:
-        result["error"] = repr(e)
+        result["error"] = str(e)
         if progress_callback:
             progress_callback(mr_iid, project_path, f"error: {e}")
 
@@ -186,8 +186,8 @@ def _post_review_results(
                 )
                 inline_posted += 1
                 continue
-            except Exception:
-                pass
+            except Exception as exc:
+                click.echo(f"  Inline failed for {c['file']}:L{c['line']}, trying as general comment...", err=True)
 
         file_body = f"**`{c['file']}` L{c['line']}**\n\n{body}"
         try:
@@ -224,6 +224,10 @@ def _handle_approval(client, result: dict, dry_run: bool) -> None:
     comments = result["comments"]
     test_summary = result["test_summary"]
     mr_data = result["mr_data"]
+
+    if mr_data is None:
+        return
+
     mr_url = result["mr_url"]
     project_path = result["project_path"]
     mr_iid = result["mr_iid"]
@@ -406,8 +410,8 @@ def review(mr_url, dry_run):
                     )
                     inline_posted += 1
                     continue
-                except Exception:
-                    pass  # Fall through to general comment
+                except Exception as exc:
+                    click.echo(f"  Inline failed for {c['file']}:L{c['line']}, trying as general comment...", err=True)
 
             # Line not in diff or inline failed — post as general comment
             file_body = f"**`{c['file']}` L{c['line']}**\n\n{body}"
@@ -502,6 +506,20 @@ def review_batch(urls, url_file, concurrency, dry_run):
         click.echo("Error: provide MR URLs as arguments or via --file", err=True)
         raise SystemExit(1)
 
+    # Deduplicate while preserving order
+    seen = set()
+    unique_urls = []
+    for url in all_urls:
+        if url not in seen:
+            seen.add(url)
+            unique_urls.append(url)
+    all_urls = unique_urls
+
+    MAX_BATCH_SIZE = 20
+    if len(all_urls) > MAX_BATCH_SIZE:
+        click.echo(f"Error: too many MRs ({len(all_urls)}). Maximum is {MAX_BATCH_SIZE}.", err=True)
+        raise SystemExit(1)
+
     config = load_config()
 
     # Parse & validate all URLs upfront
@@ -519,8 +537,12 @@ def review_batch(urls, url_file, concurrency, dry_run):
 
     click.echo(f"Reviewing {len(parsed)} MRs with concurrency={concurrency}...")
 
+    import threading
+    progress_lock = threading.Lock()
+
     def _progress(mr_iid, project_path, status):
-        click.echo(format_batch_progress(mr_iid, project_path, status), err=True)
+        with progress_lock:
+            click.echo(format_batch_progress(mr_iid, project_path, status), err=True)
 
     results_map = {}
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
@@ -549,7 +571,7 @@ def review_batch(urls, url_file, concurrency, dry_run):
                     "mr_data": None,
                     "comments": [],
                     "test_summary": None,
-                    "error": repr(e),
+                    "error": str(e),
                 }
 
     # Sequential results + approval in input order
