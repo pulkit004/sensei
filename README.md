@@ -45,14 +45,30 @@ Config is stored at `~/.sensei/` with restricted permissions (0600).
 ## Usage
 
 ```bash
-# Review an MR
+# Review a single MR
 sensei review https://gitlab.com/org/project/-/merge_requests/123
 
 # Dry run (preview without posting)
 sensei review https://gitlab.com/org/project/-/merge_requests/123 --dry-run
+
+# Review multiple MRs in parallel
+sensei review-batch --file mrs.txt
+
+# Or pass URLs directly
+sensei review-batch \
+  https://gitlab.com/org/project/-/merge_requests/123 \
+  https://gitlab.com/org/project/-/merge_requests/456
+
+# Control concurrency (default 3, max 10)
+sensei review-batch --file mrs.txt --concurrency 5
+
+# Dry run batch
+sensei review-batch --file mrs.txt --dry-run
 ```
 
-After review, you're prompted to **approve** (post to GitLab), **edit** (save to file for manual editing), or **discard**.
+The `--file` option reads MR URLs from a text file (one per line, `#` comments and blank lines ignored).
+
+After review, you're prompted to **approve** (post to GitLab), **edit** (save to file for manual editing), or **discard**. In batch mode, results are shown sequentially after all reviews complete.
 
 ## Comment types
 
