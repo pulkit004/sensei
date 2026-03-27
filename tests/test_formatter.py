@@ -97,3 +97,19 @@ def test_format_inline_comment_is_just_the_body():
     result = format_inline_comment(comment)
     assert result == comment["body"]
     assert "Code Review:" in result
+
+
+def test_format_batch_progress():
+    from sensei.formatter import format_batch_progress
+    line = format_batch_progress(47, "building-bridges-frontend", "reviewing 3/5 files...")
+    assert "!47" in line
+    assert "building-bridges-frontend" in line
+    assert "reviewing 3/5 files..." in line
+
+
+def test_format_batch_progress_short_project():
+    from sensei.formatter import format_batch_progress
+    line = format_batch_progress(126, "brokentusk/facade/docs-mdx", "done — 4 comments")
+    assert "!126" in line
+    assert "docs-mdx" in line
+    assert "done — 4 comments" in line

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Callable, Optional
 import click
 
 
@@ -49,6 +50,231 @@ def learn():
     profile = build_style_profile(comments)
     path = save_style_profile(profile)
     click.echo(f"Style profile saved to {path}")
+
+
+def _review_single_mr(
+    client,
+    config: dict,
+    project_path: str,
+    mr_iid: int,
+    mr_url: str,
+    progress_callback: Optional[Callable] = None,
+) -> dict:
+    """Fetch, review, and consolidate comments for a single MR.
+
+    Never raises — captures exceptions into the 'error' field.
+    """
+    from sensei.reviewer import (
+        review_mr_files,
+        consolidate_test_comments,
+        load_style_profile,
+        load_project_rules,
+        load_project_rules_from_repo,
+    )
+
+    result = {
+        "mr_url": mr_url,
+        "mr_iid": mr_iid,
+        "project_path": project_path,
+        "mr_data": None,
+        "comments": [],
+        "test_summary": None,
+        "error": None,
+    }
+
+    try:
+        if progress_callback:
+            progress_callback(mr_iid, project_path, "fetching MR data")
+
+        mr_data = client.get_mr_diff(project_path, mr_iid)
+        result["mr_data"] = mr_data
+
+        if progress_callback:
+            progress_callback(mr_iid, project_path, "fetching file contents")
+
+        file_contents = {}
+        for f in mr_data["files"]:
+            if not f["deleted_file"]:
+                content = client.get_file_content(
+                    project_path, f["new_path"], mr_data["source_branch"]
+                )
+                file_contents[f["new_path"]] = content
+
+        style_profile = load_style_profile()
+        project_rules = load_project_rules(project_path)
+
+        repo_rules = load_project_rules_from_repo(
+            client, project_path, mr_data["target_branch"]
+        )
+        if repo_rules:
+            project_rules = f"{project_rules}\n\n{repo_rules}" if project_rules else repo_rules
+
+        mr_context = (
+            f"Title: {mr_data['title']}\n"
+            f"Description: {mr_data['description']}\n"
+            f"Author: {mr_data['author']}"
+        )
+
+        if progress_callback:
+            progress_callback(mr_iid, project_path, "reviewing files")
+
+        all_comments = review_mr_files(
+            files=mr_data["files"],
+            file_contents=file_contents,
+            style_profile=style_profile,
+            project_rules=project_rules,
+            mr_context=mr_context,
+            batch_size=config.get("batch_size", 30),
+        )
+
+        comments, test_summary = consolidate_test_comments(all_comments)
+        result["comments"] = comments
+        result["test_summary"] = test_summary
+
+        if progress_callback:
+            progress_callback(mr_iid, project_path, "done")
+
+    except Exception as e:
+        result["error"] = repr(e)
+        if progress_callback:
+            progress_callback(mr_iid, project_path, f"error: {e}")
+
+    return result
+
+
+def _post_review_results(
+    client,
+    project_path: str,
+    mr_iid: int,
+    mr_data: dict,
+    comments: list,
+    test_summary: Optional[str],
+    diff_lines_map: dict,
+    existing: set,
+) -> tuple:
+    """Post review comments to GitLab. Returns (inline_posted, nits_posted, test_posted, skipped)."""
+    from sensei.formatter import format_inline_comment, format_nits_summary
+
+    musts = [c for c in comments if c.get("type") == "must"]
+    nits = [c for c in comments if c.get("type") == "nit"]
+
+    inline_posted = 0
+    skipped = 0
+
+    for c in musts:
+        if c["line"] == 0:
+            continue
+
+        body = format_inline_comment(c)
+        if (c["file"], c["line"]) in existing or body[:100] in existing:
+            skipped += 1
+            continue
+
+        valid_lines = diff_lines_map.get(c["file"], set())
+
+        if c["line"] in valid_lines:
+            try:
+                client.post_inline_comment(
+                    project_path=project_path,
+                    mr_iid=mr_iid,
+                    file_path=c["file"],
+                    new_line=c["line"],
+                    body=body,
+                    base_sha=mr_data["base_sha"],
+                    head_sha=mr_data["head_sha"],
+                    start_sha=mr_data["start_sha"],
+                )
+                inline_posted += 1
+                continue
+            except Exception:
+                pass
+
+        file_body = f"**`{c['file']}` L{c['line']}**\n\n{body}"
+        try:
+            client.post_mr_comment(project_path, mr_iid, file_body)
+            inline_posted += 1
+        except Exception as e:
+            click.echo(f"  Failed: {c['file']}:L{c['line']}: {e}")
+
+    nits_posted = 0
+    if nits:
+        nits_body = format_nits_summary(nits)
+        try:
+            client.post_mr_comment(project_path, mr_iid, nits_body)
+            nits_posted = 1
+        except Exception as e:
+            click.echo(f"  Failed posting nits summary: {e}")
+
+    test_posted = 0
+    if test_summary:
+        try:
+            client.post_mr_comment(project_path, mr_iid, test_summary)
+            test_posted = 1
+        except Exception as e:
+            click.echo(f"  Failed posting test summary: {e}")
+
+    return (inline_posted, nits_posted, test_posted, skipped)
+
+
+def _handle_approval(client, result: dict, dry_run: bool) -> None:
+    """Prompt the user to approve, edit, or discard a review result."""
+    from sensei.gitlab_client import extract_diff_lines
+    from sensei.formatter import format_for_gitlab
+
+    comments = result["comments"]
+    test_summary = result["test_summary"]
+    mr_data = result["mr_data"]
+    mr_url = result["mr_url"]
+    project_path = result["project_path"]
+    mr_iid = result["mr_iid"]
+
+    if (not comments and not test_summary) or dry_run:
+        return
+
+    action = click.prompt(
+        "\nAction", type=click.Choice(["approve", "edit", "discard"]), default="discard"
+    )
+
+    if action == "approve":
+        click.echo("Checking for existing comments...")
+        existing = client.get_existing_comments(project_path, mr_iid)
+
+        diff_lines_map = {}
+        for f in mr_data["files"]:
+            if f["diff"]:
+                diff_lines_map[f["new_path"]] = extract_diff_lines(f["diff"])
+
+        click.echo("Posting comments to GitLab...")
+        inline_posted, nits_posted, test_posted, skipped = _post_review_results(
+            client=client,
+            project_path=project_path,
+            mr_iid=mr_iid,
+            mr_data=mr_data,
+            comments=comments,
+            test_summary=test_summary,
+            diff_lines_map=diff_lines_map,
+            existing=existing,
+        )
+
+        parts = [f"{inline_posted} must-fix inline"]
+        if nits_posted:
+            parts.append(f"{nits_posted} nits summary")
+        if test_posted:
+            parts.append(f"{test_posted} test coverage summary")
+        if skipped:
+            parts.append(f"{skipped} skipped")
+        click.echo(f"Posted {' + '.join(parts)}")
+    elif action == "edit":
+        import os
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+            tmp.write(format_for_gitlab(comments))
+            tmp_path = tmp.name
+        os.chmod(tmp_path, 0o600)
+        click.echo(f"Review saved to {tmp_path} — edit it, then run:")
+        click.echo(f"  sensei post {mr_url} {tmp_path}")
+    else:
+        click.echo("Review discarded.")
 
 
 @main.command()
@@ -246,6 +472,105 @@ def post(mr_url, review_file):
     client = GitLabClient(config["gitlab_url"], config["gitlab_pat"])
     client.post_mr_comment(project_path, mr_iid, body)
     click.echo("Review posted!")
+
+
+@main.command("review-batch")
+@click.argument("urls", nargs=-1)
+@click.option("--file", "url_file", type=click.Path(exists=True), help="File with MR URLs (one per line)")
+@click.option("--concurrency", default=3, type=click.IntRange(1, 10), help="Max parallel reviews (1-10)")
+@click.option("--dry-run", is_flag=True, help="Show results without approval prompt")
+def review_batch(urls, url_file, concurrency, dry_run):
+    """Review multiple GitLab MRs in parallel.
+
+    Pass URLs as arguments or use --file with a file containing one URL per line.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from sensei.config import load_config
+    from sensei.gitlab_client import parse_mr_url, validate_mr_url_origin, GitLabClient
+    from sensei.formatter import format_review, format_batch_progress
+
+    # Merge URLs from args and --file
+    all_urls = list(urls)
+    if url_file:
+        with open(url_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    all_urls.append(line)
+
+    if not all_urls:
+        click.echo("Error: provide MR URLs as arguments or via --file", err=True)
+        raise SystemExit(1)
+
+    config = load_config()
+
+    # Parse & validate all URLs upfront
+    parsed = []
+    for url in all_urls:
+        try:
+            project_path, mr_iid = parse_mr_url(url)
+            validate_mr_url_origin(url, config["gitlab_url"])
+            parsed.append((url, project_path, mr_iid))
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            raise SystemExit(1)
+
+    client = GitLabClient(config["gitlab_url"], config["gitlab_pat"])
+
+    click.echo(f"Reviewing {len(parsed)} MRs with concurrency={concurrency}...")
+
+    def _progress(mr_iid, project_path, status):
+        click.echo(format_batch_progress(mr_iid, project_path, status), err=True)
+
+    results_map = {}
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        future_to_parsed = {}
+        for url, project_path, mr_iid in parsed:
+            future = pool.submit(
+                _review_single_mr,
+                client=client,
+                config=config,
+                project_path=project_path,
+                mr_iid=mr_iid,
+                mr_url=url,
+                progress_callback=_progress,
+            )
+            future_to_parsed[future] = (url, project_path, mr_iid)
+
+        for future in as_completed(future_to_parsed):
+            url, project_path, mr_iid = future_to_parsed[future]
+            try:
+                results_map[url] = future.result()
+            except Exception as e:
+                results_map[url] = {
+                    "mr_url": url,
+                    "mr_iid": mr_iid,
+                    "project_path": project_path,
+                    "mr_data": None,
+                    "comments": [],
+                    "test_summary": None,
+                    "error": repr(e),
+                }
+
+    # Sequential results + approval in input order
+    for url, project_path, mr_iid in parsed:
+        result = results_map[url]
+
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"MR !{mr_iid} — {project_path}")
+        click.echo("=" * 60)
+
+        if result.get("error"):
+            click.echo(f"Error: {result['error']}")
+            continue
+
+        mr_data = result["mr_data"]
+        click.echo(f"Title: {mr_data['title']}")
+        click.echo(format_review(result["comments"], result["test_summary"]))
+
+        _handle_approval(client, result, dry_run)
+
+    click.echo("\nBatch review complete.")
 
 
 if __name__ == "__main__":

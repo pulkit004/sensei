@@ -83,3 +83,9 @@ def format_for_gitlab(comments: list) -> str:
 def format_inline_comment(comment: dict) -> str:
     """Format a single comment for inline GitLab posting."""
     return comment["body"]
+
+
+def format_batch_progress(mr_iid: int, project_path: str, status: str) -> str:
+    """Format a compact progress line for batch MR review."""
+    short_name = project_path.rsplit("/", 1)[-1]
+    return f"  !{mr_iid} ({short_name}): {status}"
